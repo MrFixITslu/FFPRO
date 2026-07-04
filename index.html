@@ -1,0 +1,200 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Fire Finance Pro v1</title>
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2654/2654504.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Office & Document Rendering Engines -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        
+        body { 
+            font-family: 'Inter', sans-serif; 
+            overscroll-behavior-y: contain;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+
+        @keyframes marquee {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .animate-marquee {
+            display: flex;
+            width: max-content;
+            animation: marquee 50s linear infinite;
+        }
+
+        /* Document Preview Rendering Styles */
+        .office-preview-content {
+          font-family: 'Georgia', serif;
+          line-height: 1.6 !important;
+          color: #334155;
+          background: white;
+          padding: 3rem;
+          max-width: 850px;
+          margin: 0 auto;
+          box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+        }
+
+        /* Prevent overlapping in contentEditable */
+        [contenteditable] {
+          line-height: 1.6 !important;
+        }
+        [contenteditable] p, [contenteditable] span, [contenteditable] div {
+          line-height: 1.6 !important;
+          position: static !important;
+        }
+
+        .office-preview-content table {
+          border-collapse: collapse;
+          width: 100%;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.8rem;
+          margin: 1.5rem 0;
+        }
+        .office-preview-content th, .office-preview-content td {
+          border: 1px solid #e2e8f0;
+          padding: 12px;
+          text-align: left;
+        }
+        .office-preview-content th {
+          background-color: #f8fafc;
+          font-weight: 800;
+          text-transform: uppercase;
+        }
+
+        .glass-dark {
+          background: rgba(15, 23, 42, 0.95);
+          backdrop-filter: blur(24px);
+        }
+
+        /* PRINT STYLES - PDF REPORT ENGINE */
+        @media print {
+            body {
+                background: white !important;
+                color: black !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            #root {
+                padding: 0 !important;
+                max-width: none !important;
+            }
+            header, 
+            nav, 
+            aside, 
+            footer, 
+            .fixed, 
+            section.sticky, 
+            button, 
+            .no-print,
+            .no-print * ,
+            input[type="text"],
+            input[type="search"],
+            .animate-ping,
+            .verification-queue-header {
+                display: none !important;
+            }
+            
+            /* Page Break Implementation for PDF */
+            .print-only-page-break {
+                display: block !important;
+                break-after: page !important;
+                height: 0 !important;
+                visibility: hidden !important;
+            }
+
+            .bg-slate-900 {
+                background-color: #0f172a !important;
+                color: white !important;
+                -webkit-print-color-adjust: exact;
+            }
+            .bg-indigo-600 {
+                background-color: #4f46e5 !important;
+                color: white !important;
+                -webkit-print-color-adjust: exact;
+            }
+            .bg-emerald-600 {
+                background-color: #059669 !important;
+                color: white !important;
+                -webkit-print-color-adjust: exact;
+            }
+            .bg-white {
+                background-color: white !important;
+                border: 1px solid #e2e8f0 !important;
+            }
+            .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl {
+                box-shadow: none !important;
+                border: 1px solid #e2e8f0 !important;
+            }
+            .rounded-\[3rem\], .rounded-\[4rem\], .rounded-\[2\.5rem\], .rounded-\[3\.5rem\] {
+                border-radius: 12px !important;
+              }
+              .flex-col.lg\:flex-row {
+                  flex-direction: column !important;
+              }
+              .grid {
+                  display: block !important;
+              }
+              .grid > div {
+                  margin-bottom: 20px !important;
+                  width: 100% !important;
+              }
+              section {
+                  break-inside: avoid;
+                  page-break-inside: avoid;
+                  margin-bottom: 2rem !important;
+              }
+              h2, h3, h4 {
+                  color: black !important;
+              }
+              .text-indigo-400, .text-indigo-600 { color: #4f46e5 !important; }
+              .text-emerald-400, .text-emerald-600 { color: #059669 !important; }
+              .text-rose-400, .text-rose-600 { color: #e11d48 !important; }
+  
+              /* Ensure Ledger fits on page */
+              .overflow-y-auto {
+                  overflow: visible !important;
+                  max-height: none !important;
+              }
+              .TransactionLedger {
+                  display: table !important;
+                  width: 100% !important;
+              }
+          }
+      </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "react/": "https://esm.sh/react@^19.0.0/",
+      "react": "https://esm.sh/react@^19.0.0",
+      "react-dom/": "https://esm.sh/react-dom@^19.0.0/",
+      "@google/genai": "https://esm.sh/@google/genai@^1.3.0",
+      "recharts": "https://esm.sh/recharts@^2.15.0"
+    }
+  }
+  </script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
+      <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+  </html>

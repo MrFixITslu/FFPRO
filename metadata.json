@@ -1,0 +1,8 @@
+{
+  "name": "Fire Finance Pro v1",
+  "description": "A friction-less personal finance app that uses AI to parse voice, text, and receipts into structured budget data, making daily expense tracking effortless with local-first storage.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
