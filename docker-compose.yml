@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ffpro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ffpro_password}
+      POSTGRES_DB: ffpro
+    volumes:
+      - ffpro_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ffpro"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./server
+    restart: unless-stopped
+    env_file:
+      - ./server/.env
+    volumes:
+      # Mount the Apple Sign In private key (.p8) read-only if you're using Apple auth.
+      - ./server/secrets:/run/secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "4000"
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  ffpro_pgdata:

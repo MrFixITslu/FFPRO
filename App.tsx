@@ -28,6 +28,7 @@ import {
   STORAGE_KEYS 
 } from './types';
 import { vaultService, AppState } from './services/vaultService';
+import { authService, AuthUser } from './services/authService';
 import { 
   Shield, 
   ShieldCheck, 
@@ -94,12 +95,29 @@ const MarketTicker = ({ prices, quotaExhausted }: { prices: MarketPrice[], quota
 };
 
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => localStorage.getItem(STORAGE_KEYS.AUTH) === 'true');
-  const [currentUsername, setCurrentUsername] = useState<string>(() => localStorage.getItem(STORAGE_KEYS.AUTH_USER) || '');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'calendar' | 'events' | 'projections'>(() => {
-    const user = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
-    return user === ADMIN_USER ? 'dashboard' : 'events';
-  });
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const isAuthenticated = !!authUser;
+  const currentUsername = authUser?.username || authUser?.displayName || (authUser?.email ? authUser.email.split('@')[0] : '');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'calendar' | 'events' | 'projections'>('events');
+
+  // Restore session (cookie-based) from the backend on load, including right after
+  // an OAuth provider redirects back here.
+  useEffect(() => {
+    let cancelled = false;
+    authService.me()
+      .then((user) => {
+        if (cancelled) return;
+        setAuthUser(user);
+        if (user) {
+          const uname = user.username || user.displayName || user.email.split('@')[0];
+          setActiveTab(uname === ADMIN_USER ? 'dashboard' : 'events');
+        }
+      })
+      .catch(() => { if (!cancelled) setAuthUser(null); })
+      .finally(() => { if (!cancelled) setAuthChecked(true); });
+    return () => { cancelled = true; };
+  }, []);
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => safeParse(STORAGE_KEYS.TRANSACTIONS, []));
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => safeParse(STORAGE_KEYS.RECURRING_EXPENSES, []));
@@ -289,16 +307,10 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleLogin = (user: string, pass: string) => {
-    const success = user.length > 2;
-    if (success) {
-      setIsAuthenticated(true);
-      setCurrentUsername(user);
-      localStorage.setItem(STORAGE_KEYS.AUTH, 'true');
-      localStorage.setItem(STORAGE_KEYS.AUTH_USER, user);
-      setActiveTab(user === ADMIN_USER ? 'dashboard' : 'events');
-    }
-    return success;
+  const handleAuthenticated = (user: AuthUser) => {
+    setAuthUser(user);
+    const uname = user.username || user.displayName || user.email.split('@')[0];
+    setActiveTab(uname === ADMIN_USER ? 'dashboard' : 'events');
   };
 
   const handleLogout = async () => {
@@ -308,9 +320,12 @@ const App: React.FC = () => {
         await vaultService.saveState(vaultHandle, getFullState());
       } catch (e) { console.warn("Logout backup failed."); }
     }
-    setIsAuthenticated(false);
-    localStorage.removeItem(STORAGE_KEYS.AUTH);
-    localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+    try {
+      await authService.logout();
+    } catch (e) {
+      console.warn('Logout request failed, clearing local session state anyway.');
+    }
+    setAuthUser(null);
   };
 
   const onAddTransaction = (t: Omit<Transaction, 'id'>) => {
@@ -432,10 +447,18 @@ const App: React.FC = () => {
     setCalendarItems(items);
   };
 
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <i className="fas fa-circle-notch fa-spin text-indigo-400 text-3xl"></i>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {!isAuthenticated ? (
-        <Login onLogin={handleLogin} onReset={() => { localStorage.clear(); window.location.reload(); }} />
+        <Login onAuthenticated={handleAuthenticated} />
       ) : (
         <>
           <MarketTicker prices={marketPrices} quotaExhausted={quotaExhausted} />
