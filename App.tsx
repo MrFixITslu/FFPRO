@@ -29,6 +29,7 @@ import {
 } from './types';
 import { vaultService, AppState } from './services/vaultService';
 import { authService, AuthUser } from './services/authService';
+import { dataSyncService, SyncConflictError } from './services/dataSyncService';
 import { 
   Shield, 
   ShieldCheck, 
@@ -152,6 +153,13 @@ const App: React.FC = () => {
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
+  // --- Per-account cloud sync state ---
+  const [cloudLoaded, setCloudLoaded] = useState(false); // has the initial pull for THIS account finished?
+  const [cloudVersion, setCloudVersion] = useState(0);
+  const [cloudSyncing, setCloudSyncing] = useState(false);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+  const [cloudLastSyncTime, setCloudLastSyncTime] = useState<string | null>(null);
+
   const isAdmin = currentUsername === ADMIN_USER;
 
   // PWA Install Prompt
@@ -189,6 +197,137 @@ const App: React.FC = () => {
     cashOpeningBalance,
     lastUpdated: new Date().toISOString()
   }), [transactions, recurringExpenses, recurringIncomes, savingGoals, investmentGoals, categoryBudgets, bankConnections, investments, events, calendarItems, contacts, cashOpeningBalance]);
+
+  // Loads a full AppState (from the cloud or a vault backup) into local state.
+  const applyRemoteState = useCallback((state: AppState) => {
+    setTransactions(state.transactions || []);
+    setRecurringExpenses(state.recurringExpenses || []);
+    setRecurringIncomes(state.recurringIncomes || []);
+    setSavingGoals(state.savingGoals || []);
+    setInvestmentGoals(state.investmentGoals || []);
+    setCategoryBudgets(state.categoryBudgets || {});
+    setBankConnections(state.bankConnections || []);
+    setInvestments(state.investments || []);
+    setEvents(state.events || []);
+    setCalendarItems(state.calendarItems || []);
+    setContacts(state.contacts || []);
+    setCashOpeningBalance(state.cashOpeningBalance || 0);
+  }, []);
+
+  // Wipes everything local — used when switching accounts on a shared browser
+  // and on logout/purge, so one account's financial data can never bleed into
+  // another session on the same device.
+  const clearLocalData = useCallback(() => {
+    setTransactions([]);
+    setRecurringExpenses([]);
+    setRecurringIncomes([]);
+    setSavingGoals([]);
+    setInvestmentGoals([]);
+    setCategoryBudgets({});
+    setBankConnections([]);
+    setInvestments([]);
+    setEvents([]);
+    setCalendarItems([]);
+    setContacts([]);
+    setCashOpeningBalance(0);
+    Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+  }, []);
+
+  // --- Per-account cloud sync: initial load ---------------------------------
+  // Runs whenever we get a confirmed logged-in user (fresh login, OAuth
+  // redirect, or restored session on page load).
+  useEffect(() => {
+    if (!authChecked || !authUser) return;
+
+    let cancelled = false;
+
+    (async () => {
+      // If this browser's local cache belongs to a DIFFERENT account (e.g. the
+      // previous user closed the tab instead of logging out), wipe it first —
+      // otherwise we'd either leak their data into this session or upload it
+      // as if it were this account's data.
+      const cachedOwner = localStorage.getItem(STORAGE_KEYS.DATA_OWNER);
+      if (cachedOwner && cachedOwner !== authUser.id) {
+        clearLocalData();
+      }
+      localStorage.setItem(STORAGE_KEYS.DATA_OWNER, authUser.id);
+
+      setCloudError(null);
+      setCloudSyncing(true);
+      try {
+        const remote = await dataSyncService.fetch();
+        if (cancelled) return;
+        if (remote.data) {
+          applyRemoteState(remote.data);
+          setCloudVersion(remote.version);
+          setCloudLastSyncTime(remote.updatedAt);
+        } else {
+          // Nothing synced yet for this account — treat whatever's in this
+          // (now confirmed same-owner, or freshly cleared) browser as the
+          // starting point and push it up as version 1.
+          const initial = getFullState();
+          const result = await dataSyncService.save(initial, 0);
+          if (cancelled) return;
+          setCloudVersion(result.version);
+          setCloudLastSyncTime(new Date().toISOString());
+        }
+      } catch (err) {
+        console.error('Initial cloud sync failed:', err);
+        if (!cancelled) setCloudError('Could not reach the cloud. Working locally until reconnected.');
+      } finally {
+        if (!cancelled) {
+          setCloudSyncing(false);
+          setCloudLoaded(true);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // Intentionally only re-runs when the authenticated user identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authChecked, authUser?.id]);
+
+  // --- Per-account cloud sync: debounced autosave ---------------------------
+  const pushToCloud = useCallback(async () => {
+    if (!cloudLoaded) return;
+    setCloudSyncing(true);
+    setCloudError(null);
+    try {
+      const result = await dataSyncService.save(getFullState(), cloudVersion);
+      setCloudVersion(result.version);
+      setCloudLastSyncTime(new Date().toISOString());
+    } catch (err) {
+      if (err instanceof SyncConflictError) {
+        // Someone else (another device/tab on this account) saved more
+        // recently. Pull their copy rather than clobbering it — we surface
+        // this so the user knows a just-made local edit may not have stuck.
+        try {
+          const remote = await dataSyncService.fetch();
+          if (remote.data) {
+            applyRemoteState(remote.data);
+            setCloudVersion(remote.version);
+            setCloudLastSyncTime(remote.updatedAt);
+          }
+          setCloudError('Data was updated on another device. The latest version has been loaded — please redo any change you just made here.');
+        } catch (fetchErr) {
+          console.error('Conflict recovery fetch failed:', fetchErr);
+          setCloudError('Sync conflict detected, and reloading the latest data failed. Refresh the page.');
+        }
+      } else {
+        console.error('Cloud sync failed:', err);
+        setCloudError('Could not save to the cloud. Your changes are still saved on this device.');
+      }
+    } finally {
+      setCloudSyncing(false);
+    }
+  }, [cloudLoaded, cloudVersion, getFullState, applyRemoteState]);
+
+  useEffect(() => {
+    if (!cloudLoaded) return;
+    const timer = setTimeout(() => { pushToCloud(); }, 3000); // 3s debounce
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, recurringExpenses, recurringIncomes, savingGoals, investmentGoals, categoryBudgets, bankConnections, investments, events, calendarItems, contacts, cashOpeningBalance, cloudLoaded]);
 
   // Restore Vault Handle on Mount
   useEffect(() => {
@@ -266,6 +405,7 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.RECURRING_EXPENSES, JSON.stringify(recurringExpenses));
     localStorage.setItem(STORAGE_KEYS.RECURRING_INCOMES, JSON.stringify(recurringIncomes));
     localStorage.setItem(STORAGE_KEYS.SAVINGS_GOALS, JSON.stringify(savingGoals));
+    localStorage.setItem(STORAGE_KEYS.INVESTMENT_GOALS, JSON.stringify(investmentGoals));
     localStorage.setItem(STORAGE_KEYS.BANK_CONNECTIONS, JSON.stringify(bankConnections));
     localStorage.setItem(STORAGE_KEYS.INVESTMENTS, JSON.stringify(investments));
     localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events));
@@ -273,7 +413,7 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
     localStorage.setItem(STORAGE_KEYS.CATEGORY_LIMITS, JSON.stringify(categoryBudgets));
     localStorage.setItem(STORAGE_KEYS.CASH_OPENING, cashOpeningBalance.toString());
-  }, [transactions, recurringExpenses, recurringIncomes, savingGoals, bankConnections, investments, events, calendarItems, contacts, categoryBudgets, cashOpeningBalance]);
+  }, [transactions, recurringExpenses, recurringIncomes, savingGoals, investmentGoals, bankConnections, investments, events, calendarItems, contacts, categoryBudgets, cashOpeningBalance]);
 
   const fetchMarketData = async () => {
     try {
@@ -320,11 +460,25 @@ const App: React.FC = () => {
         await vaultService.saveState(vaultHandle, getFullState());
       } catch (e) { console.warn("Logout backup failed."); }
     }
+    // Flush any pending edits to the cloud before we wipe local state.
+    if (cloudLoaded) {
+      try {
+        await pushToCloud();
+      } catch (e) { console.warn('Final cloud sync before logout failed.'); }
+    }
     try {
       await authService.logout();
     } catch (e) {
       console.warn('Logout request failed, clearing local session state anyway.');
     }
+    // Wipe the in-memory + localStorage copy of this account's data. Without
+    // this, a second account signing in on the same browser would briefly
+    // see (and could even overwrite) the previous account's data.
+    clearLocalData();
+    setCloudLoaded(false);
+    setCloudVersion(0);
+    setCloudError(null);
+    setCloudLastSyncTime(null);
     setAuthUser(null);
   };
 
@@ -466,13 +620,15 @@ const App: React.FC = () => {
           <header className="fixed top-8 left-0 right-0 z-[110] px-4 print:hidden">
             <div className="max-w-6xl mx-auto bg-white/80 backdrop-blur-xl border border-slate-100 rounded-[2.5rem] shadow-2xl p-2 flex items-center justify-between">
               <div className="flex items-center gap-1">
-                <button 
-                  onClick={() => setActiveTab('dashboard')} 
-                  className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
-                >
-                  <LayoutDashboard size={16} />
-                  <span className="text-[11px] font-black uppercase tracking-widest">Dashboard</span>
-                </button>
+                {isAdmin && (
+                  <button 
+                    onClick={() => setActiveTab('dashboard')} 
+                    className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+                  >
+                    <LayoutDashboard size={16} />
+                    <span className="text-[11px] font-black uppercase tracking-widest">Dashboard</span>
+                  </button>
+                )}
                 <button 
                   onClick={() => setActiveTab('calendar')} 
                   className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'calendar' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
@@ -487,13 +643,15 @@ const App: React.FC = () => {
                   <Zap size={16} />
                   <span className="text-[11px] font-black uppercase tracking-widest">Project Planner</span>
                 </button>
-                <button 
-                  onClick={() => setActiveTab('projections')} 
-                  className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'projections' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
-                >
-                  <TrendingUp size={16} />
-                  <span className="text-[11px] font-black uppercase tracking-widest">Wealth Forecast</span>
-                </button>
+                {isAdmin && (
+                  <button 
+                    onClick={() => setActiveTab('projections')} 
+                    className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'projections' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+                  >
+                    <TrendingUp size={16} />
+                    <span className="text-[11px] font-black uppercase tracking-widest">Wealth Forecast</span>
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-3 pr-2">
@@ -507,6 +665,32 @@ const App: React.FC = () => {
                     <span className="text-[9px] font-black uppercase tracking-tighter">Install App</span>
                   </button>
                 )}
+
+                {/* Cloud Sync Status Indicator */}
+                <div
+                  className="hidden md:flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-full border border-slate-100"
+                  title={cloudError || undefined}
+                >
+                  {cloudSyncing ? (
+                    <RefreshCw size={14} className="text-indigo-500 animate-spin" />
+                  ) : cloudError ? (
+                    <ShieldAlert size={14} className="text-rose-500" />
+                  ) : cloudLoaded ? (
+                    <ShieldCheck size={14} className="text-emerald-500" />
+                  ) : (
+                    <Shield size={14} className="text-slate-300" />
+                  )}
+                  <div className="flex flex-col">
+                    <span className="text-[9px] font-black uppercase tracking-tighter text-slate-400 leading-none">Cloud Sync</span>
+                    <span className="text-[8px] font-bold text-slate-500 leading-none mt-0.5">
+                      {cloudError
+                        ? 'Attention needed'
+                        : cloudLastSyncTime
+                        ? `Synced ${new Date(cloudLastSyncTime).toLocaleTimeString()}`
+                        : 'Connecting…'}
+                    </span>
+                  </div>
+                </div>
 
                 {/* Vault Status Indicator */}
                 <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-full border border-slate-100">
@@ -676,7 +860,12 @@ const App: React.FC = () => {
               onAddInvestmentGoal={(i) => setInvestmentGoals(prev => [...prev, {...i, id: generateId()}])}
               onDeleteInvestmentGoal={(id) => setInvestmentGoals(prev => prev.filter(i => i.id !== id))}
               onExportData={() => {}}
-              onResetData={() => { if (confirm("Purge vault?")) { localStorage.clear(); window.location.reload(); }}}
+              onResetData={() => {
+                if (!confirm("Purge all data for this account? This clears both this device and your cloud-synced copy, and cannot be undone.")) return;
+                dataSyncService.clear()
+                  .catch((e) => console.warn('Cloud purge failed (continuing with local purge):', e))
+                  .finally(() => { localStorage.clear(); window.location.reload(); });
+              }}
               onClose={() => setShowSettings(false)}
               onLogout={handleLogout}
               remindersEnabled={false}

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ffpro
@@ -27,14 +27,22 @@ services:
         condition: service_healthy
     expose:
       - "4000"
+    # Container-level healthcheck is defined in server/Dockerfile.
 
   web:
     build: .
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   ffpro_pgdata:

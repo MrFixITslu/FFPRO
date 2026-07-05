@@ -263,5 +263,6 @@ export const STORAGE_KEYS = {
   AUTH_USER: 'ff_auth_username',
   USERS_LIST: 'ff_users_list',
   REMINDERS: 'ff_reminders_enabled',
-  PASSWORD: 'ff_custom_password'
+  PASSWORD: 'ff_custom_password',
+  DATA_OWNER: 'ff_data_owner_id'
 };
