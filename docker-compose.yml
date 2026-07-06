@@ -32,17 +32,26 @@ services:
   web:
     build: .
     restart: unless-stopped
+    container_name: ffpro_web
     depends_on:
       backend:
         condition: service_started
-    ports:
-      - "127.0.0.1:8080:80"
+    networks:
+      - default
+      - proxy_network
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+    # No `ports:` — nothing is exposed to the host at all.
+    # Nginx Proxy Manager reaches this container over `proxy_network` by its
+    # container name (ffpro_web), not via a published host port.
 
 volumes:
   ffpro_pgdata:
+
+networks:
+  proxy_network:
+    external: true
