@@ -14,9 +14,10 @@ services:
       timeout: 5s
       retries: 10
 
-  backend:
-    build: ./server
+  app:
+    build: .
     restart: unless-stopped
+    container_name: ffpro_app
     env_file:
       - ./server/.env
     volumes:
@@ -25,29 +26,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    expose:
-      - "4000"
-    # Container-level healthcheck is defined in server/Dockerfile.
-
-  web:
-    build: .
-    restart: unless-stopped
-    container_name: ffpro_web
-    depends_on:
-      backend:
-        condition: service_started
     networks:
       - default
       - proxy_network
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    # No `ports:` — nothing is exposed to the host at all.
-    # Nginx Proxy Manager reaches this container over `proxy_network` by its
-    # container name (ffpro_web), not via a published host port.
+    # No `ports:` — NPM reaches this over proxy_network by container name (ffpro_app).
 
 volumes:
   ffpro_pgdata:
