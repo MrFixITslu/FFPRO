@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
     container_name: ffpro_app
     ports:
-      - "8080:80"
+      - "0.0.0.0:8080:80"
     env_file:
       - ./server/.env
     volumes:
