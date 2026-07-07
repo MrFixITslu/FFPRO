@@ -1,0 +1,25 @@
+# ---- Stage 1: install backend deps ----
+FROM node:20-alpine AS backend-build
+WORKDIR /app/server
+COPY server/package.json server/package-lock.json ./
+RUN npm ci --omit=dev
+COPY server/ ./
+
+# ---- Stage 2: backend only, no nginx, no supervisor ----
+FROM node:20-alpine
+
+RUN apk add --no-cache postgresql16-client tini
+
+WORKDIR /app/server
+COPY --from=backend-build /app/server ./
+RUN chown -R node:node /app/server
+USER node
+
+EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:4000/api/health || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--"]
+# Wait for postgres to accept connections, run migrations, then start the API.
+CMD ["sh", "-c", "until pg_isready -h postgres -U ffpro -q; do echo '[backend] waiting for postgres...'; sleep 1; done; node scripts/migrate.js && exec node src/index.js"]

@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16.4-alpine
     restart: unless-stopped
+    container_name: ffpro_postgres
     environment:
       POSTGRES_USER: ffpro
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ffpro_password}
@@ -14,12 +15,12 @@ services:
       timeout: 5s
       retries: 10
 
-  app:
-    build: .
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
     restart: unless-stopped
-    container_name: ffpro_app
-    ports:
-      - "0.0.0.0:8080:80"
+    container_name: ffpro_backend
     env_file:
       - ./server/.env
     volumes:
@@ -28,6 +29,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # No "ports:" here on purpose — the backend is only reachable from the
+    # nginx container over the compose network, never directly from outside.
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    restart: unless-stopped
+    container_name: ffpro_nginx
+    ports:
+      - "0.0.0.0:8080:80"
+    depends_on:
+      - backend
 
 volumes:
   ffpro_pgdata:
