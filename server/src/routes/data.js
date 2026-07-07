@@ -2,14 +2,61 @@ import { Router } from 'express';
 import { pool } from '../db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { encryptForUser, decryptForUser } from '../crypto.js';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
 
-// Generous but bounded — this holds one user's entire finance dataset
-// (transactions, budgets, goals, etc.) as JSON, not file uploads.
-const MAX_BYTES = 5 * 1024 * 1024; // 5MB
+// FIX: Add schema validation for data payloads
+function validateAppState(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return 'Invalid data format.';
+  }
+  
+  // Basic structure validation
+  if (data.transactions && !Array.isArray(data.transactions)) {
+    return 'Transactions must be an array.';
+  }
+  if (data.recurringExpenses && !Array.isArray(data.recurringExpenses)) {
+    return 'Recurring expenses must be an array.';
+  }
+  if (data.recurringIncomes && !Array.isArray(data.recurringIncomes)) {
+    return 'Recurring incomes must be an array.';
+  }
+  if (data.savingGoals && !Array.isArray(data.savingGoals)) {
+    return 'Saving goals must be an array.';
+  }
+  if (data.investmentGoals && !Array.isArray(data.investmentGoals)) {
+    return 'Investment goals must be an array.';
+  }
+  if (data.contacts && !Array.isArray(data.contacts)) {
+    return 'Contacts must be an array.';
+  }
+  if (data.events && !Array.isArray(data.events)) {
+    return 'Events must be an array.';
+  }
+  if (data.categoryBudgets && typeof data.categoryBudgets !== 'object') {
+    return 'Category budgets must be an object.';
+  }
+  if (data.bankConnections && !Array.isArray(data.bankConnections)) {
+    return 'Bank connections must be an array.';
+  }
+  
+  return null;
+}
+
+// Generous but bounded write limiter for data sync
+const dataWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 router.use(requireAuth);
+
+// FIX: Apply rate limiting to all write operations (GET is exempt)
+router.put('/', dataWriteLimiter);
+router.delete('/', dataWriteLimiter);
 
 router.get('/', async (req, res) => {
   try {
@@ -35,8 +82,11 @@ router.get('/', async (req, res) => {
 
 router.put('/', async (req, res) => {
   const { data, expectedVersion } = req.body || {};
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-    return res.status(400).json({ error: 'Invalid payload.' });
+  
+  // FIX: Add comprehensive schema validation
+  const validationError = validateAppState(data);
+  if (validationError || typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return res.status(400).json({ error: validationError || 'Invalid payload.' });
   }
   if (typeof expectedVersion !== 'number') {
     return res.status(400).json({ error: 'expectedVersion is required.' });

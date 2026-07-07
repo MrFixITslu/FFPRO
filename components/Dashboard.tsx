@@ -2,7 +2,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, BarChart, Bar, Cell } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal, SavingGoal } from '../types';
-import { GoogleGenAI } from "@google/genai";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -321,13 +320,27 @@ const Dashboard: React.FC<Props> = ({
       if (transactions.length < 1) { setAiInsight("Welcome! Log spend to unlock insights."); return; }
       setIsGeneratingInsight(true);
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Rollover: $${cycleRollover.toFixed(2)}. Daily Safe Spend: $${dailySafeSpend.toFixed(2)}. Net Margin: $${netMargin.toFixed(2)}.`;
-        const response = await ai.models.generateContent({ 
-          model: 'gemini-3-flash-preview', 
-          contents: { parts: [{ text: `Context: ${context}\nAction: One ultra-concise finance tip.` }] }
+        // FIX: Call backend endpoint instead of direct Gemini API
+        const response = await fetch('/api/ai/insights', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            totalIncome: totalActualIncome,
+            totalExpenses: totalActualExpenses,
+            netWorth: netWorth,
+            cycleRollover: cycleRollover,
+            dailySafeSpend: dailySafeSpend,
+            netMargin: netMargin
+          })
         });
-        setAiInsight(response.text || "Portfolio stable.");
+
+        if (response.ok) {
+          const data = await response.json();
+          setAiInsight(data.insight || "Portfolio stable.");
+        } else {
+          setAiInsight("Gemini Advisor on standby.");
+        }
       } catch (e) { 
         setAiInsight("Gemini Advisor on standby."); 
       } finally { 

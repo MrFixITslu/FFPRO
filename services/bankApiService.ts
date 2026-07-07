@@ -1,9 +1,9 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
 import { InstitutionType, Transaction, AIAnalysisResult } from "../types";
 
 /**
  * Intelligent Gateway for regional institutions and investment platforms.
+ * FIX: Now uses backend endpoint instead of direct API calls
  */
 export const syncBankData = async (
   institution: string,
@@ -11,46 +11,21 @@ export const syncBankData = async (
 ): Promise<any[]> => {
   if (!lastSynced) return [];
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  await new Promise(resolve => setTimeout(resolve, 2000));
-
   try {
-    const isCreditUnion = institution.toLowerCase().includes('credit union');
-    const specificContext = isCreditUnion 
-      ? `This is a Credit Union institution (${institution}). Include entries like 'Member Dividends', 'Loan Repayment', 'Share Contribution'.`
-      : `This is a standard commercial bank (${institution}).`;
-
-    const prompt = `
-      Simulate a JSON API response for ${institution}. 
-      Last sync: ${lastSynced}.
-      ${specificContext}
-      Generate 2-3 realistic recent transactions.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              amount: { type: Type.NUMBER },
-              category: { type: Type.STRING },
-              description: { type: Type.STRING },
-              type: { type: Type.STRING, enum: ["expense", "income"] },
-              date: { type: Type.STRING },
-              vendor: { type: Type.STRING }
-            },
-            required: ["amount", "category", "description", "type", "date"]
-          }
-        }
-      }
+    const response = await fetch('/api/ai/bank-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ institution, lastSynced })
     });
 
-    return JSON.parse(response.text);
+    if (!response.ok) {
+      console.error('Bank sync error:', response.statusText);
+      return [];
+    }
+
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error("Bank API Error:", error);
     return [];
@@ -59,50 +34,26 @@ export const syncBankData = async (
 
 /**
  * Investment Extraction (Binance/Vanguard).
- * Now structured to return portfolio updates instead of just transactions.
+ * FIX: Now uses backend endpoint instead of direct API calls
  */
 export const syncInvestmentHoldings = async (
   provider: 'Binance' | 'Vanguard'
 ): Promise<AIAnalysisResult[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  await new Promise(resolve => setTimeout(resolve, 2500));
-
   try {
-    const prompt = `
-      Simulate a ${provider} Portfolio API response.
-      For Binance, include current BTC, ETH, and SOL holdings with precise quantities.
-      For Vanguard, include VOO and VOOG.
-      Format the response as a verification queue payload with updateType 'portfolio'.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              updateType: { type: Type.STRING, enum: ["portfolio"] },
-              portfolio: {
-                type: Type.OBJECT,
-                properties: {
-                  symbol: { type: Type.STRING },
-                  quantity: { type: Type.NUMBER },
-                  provider: { type: Type.STRING, enum: ["Binance", "Vanguard"] }
-                },
-                required: ["symbol", "quantity", "provider"]
-              }
-            },
-            required: ["updateType", "portfolio"]
-          }
-        }
-      }
+    const response = await fetch('/api/ai/investment-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ provider })
     });
 
-    return JSON.parse(response.text);
+    if (!response.ok) {
+      console.error('Investment sync error:', response.statusText);
+      return [];
+    }
+
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error("Investment Sync Error:", error);
     return [];

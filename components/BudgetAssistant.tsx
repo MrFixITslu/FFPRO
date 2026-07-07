@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { Transaction, InvestmentAccount, MarketPrice } from '../types';
 
 interface Props {
@@ -33,8 +32,7 @@ const BudgetAssistant: React.FC<Props> = ({ transactions, investments, marketPri
     setIsTyping(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
+      // FIX: Call backend endpoint instead of direct Gemini API
       const totalInvestments = investments.reduce((acc, inv) => {
         return acc + inv.holdings.reduce((hAcc, h) => {
           const live = marketPrices.find(m => m.symbol === h.symbol)?.price || h.purchasePrice;
@@ -42,24 +40,29 @@ const BudgetAssistant: React.FC<Props> = ({ transactions, investments, marketPri
         }, 0);
       }, 0);
 
-      const context = `
-        User Cash Balance: $${availableFunds.toFixed(2)}
-        User Investment Portfolio: $${totalInvestments.toFixed(2)}
-        Linked Accounts: ${investments.map(i => i.provider).join(', ') || 'None'}
-        Top Holdings: ${investments.flatMap(i => i.holdings).map(h => h.symbol).join(', ')}
-        Latest Market Tickers: ${marketPrices.map(m => `${m.symbol}: $${m.price.toFixed(2)} (${m.change24h.toFixed(2)}%)`).join('; ')}
-        Recent Spend: ${transactions.slice(0, 3).map(t => `${t.description} ($${t.amount})`).join(', ')}
-      `;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Context: ${context}\nUser Question: ${userMsg}`,
-        config: {
-          systemInstruction: "You are an elite, concise financial advisor. You use the user's specific data to answer questions about their budget and investments. Be encouraging but realistic. Keep responses under 3 sentences."
-        }
+      const response = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          message: userMsg,
+          context: {
+            availableFunds,
+            totalInvestments,
+            providers: investments.map(i => i.provider),
+            holdings: investments.flatMap(i => i.holdings).map(h => h.symbol),
+            marketPrices: marketPrices.map(m => ({ symbol: m.symbol, price: m.price, change24h: m.change24h })),
+            recentTransactions: transactions.slice(0, 3).map(t => ({ description: t.description, amount: t.amount }))
+          }
+        })
       });
 
-      setMessages(prev => [...prev, { role: 'ai', text: response.text || "I'm processing your data. Please ask me again in a moment." }]);
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(prev => [...prev, { role: 'ai', text: data.message || "I'm processing your data. Please ask me again in a moment." }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'ai', text: "Service temporary unavailable. Please check your internet connection." }]);
+      }
     } catch (err) {
       setMessages(prev => [...prev, { role: 'ai', text: "Service temporary unavailable. Please check your internet connection." }]);
     } finally {

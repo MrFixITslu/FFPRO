@@ -7,6 +7,35 @@ const router = Router();
 const FRONTEND_URL = (process.env.FRONTEND_URL || '/').replace(/\/$/, '');
 const AVAILABLE_OAUTH_PROVIDERS = [];
 
+// FIX: Add password validation function
+function validatePasswordStrength(password) {
+  if (!password || password.length < 8) {
+    return 'Password must be at least 8 characters.';
+  }
+  if (!/[A-Z]/.test(password)) {
+    return 'Password must contain at least one uppercase letter.';
+  }
+  if (!/[a-z]/.test(password)) {
+    return 'Password must contain at least one lowercase letter.';
+  }
+  if (!/[0-9]/.test(password)) {
+    return 'Password must contain at least one number.';
+  }
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    return 'Password must contain at least one special character (!@#$%^&*).';
+  }
+  return null;
+}
+
+// FIX: Sanitize display names
+function sanitizeDisplayName(name) {
+  if (!name) return null;
+  const trimmed = String(name).trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > 100) return trimmed.substring(0, 100);
+  return trimmed;
+}
+
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   AVAILABLE_OAUTH_PROVIDERS.push('google');
 }
@@ -51,21 +80,32 @@ function ensureOAuthProvider(req, res, next, provider) {
 // --- Email + password ------------------------------------------------------
 router.post('/register', async (req, res) => {
   const { email, username, password } = req.body || {};
-  if (!email || !password || String(password).length < 8) {
-    return res.status(400).json({ error: 'Email and a password of at least 8 characters are required.' });
+  
+  // FIX: Add password strength validation
+  const passwordError = validatePasswordStrength(password);
+  if (!email || passwordError) {
+    return res.status(400).json({ error: passwordError || 'Email is required.' });
   }
 
   try {
-    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    // FIX: Ensure case-insensitive email uniqueness
+    const existing = await pool.query(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
     if (existing.rows[0]) {
       return res.status(409).json({ error: 'An account with that email already exists. Try signing in instead.' });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    // FIX: Sanitize display name
+    const sanitizedUsername = sanitizeDisplayName(username);
+    const displayName = sanitizedUsername || email.split('@')[0];
+    
     const inserted = await pool.query(
       `INSERT INTO users (email, username, password_hash, display_name, last_login_at)
-       VALUES ($1, $2, $3, $4, now()) RETURNING *`,
-      [email.toLowerCase(), username || null, passwordHash, username || email.split('@')[0]]
+       VALUES (LOWER($1), $2, $3, $4, now()) RETURNING *`,
+      [email, sanitizedUsername, passwordHash, displayName]
     );
 
     req.login(inserted.rows[0], (err) => {
@@ -88,7 +128,11 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
+    // FIX: Use case-insensitive email lookup
+    const { rows } = await pool.query(
+      'SELECT * FROM users WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
     const user = rows[0];
     if (!user || !user.password_hash) {
       return res.status(401).json({ error: 'Invalid email or password.' });
@@ -112,9 +156,17 @@ router.post('/login', async (req, res) => {
 
 router.post('/logout', (req, res) => {
   req.logout((err) => {
-    if (err) return res.status(500).json({ error: 'Logout failed.' });
-    req.session.destroy(() => {
-      res.clearCookie('ffpro.sid');
+    if (err) {
+      console.error('Logout passport error:', err);
+      return res.status(500).json({ error: 'Logout failed.' });
+    }
+    // FIX: Use async/await-compatible destroy with proper error handling
+    req.session.destroy((destroyErr) => {
+      if (destroyErr) {
+        console.error('Session destroy error:', err);
+        // Still clear cookie and return success even if destroy fails
+      }
+      res.clearCookie('ffpro.sid', { path: '/', httpOnly: true, sameSite: 'lax' });
       res.json({ ok: true });
     });
   });

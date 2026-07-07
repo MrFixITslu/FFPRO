@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import Login from './components/Login';
 import MagicInput from './components/MagicInput';
 import TransactionForm from './components/TransactionForm';
@@ -60,7 +59,17 @@ const safeParse = (key: string, fallback: any) => {
   }
 };
 
-const generateId = () => Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+// FIX: Use cryptographically secure random ID generation instead of Math.random()
+const generateId = (): string => {
+  // Use crypto.randomUUID() if available (modern browsers)
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  // Fallback for older browsers: generate secure random bytes
+  const randomBytes = new Uint8Array(16);
+  crypto.getRandomValues(randomBytes);
+  return Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
+};
 
 const MarketTicker = ({ prices, quotaExhausted }: { prices: MarketPrice[], quotaExhausted: boolean }) => {
   return (
@@ -415,28 +424,30 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.CASH_OPENING, cashOpeningBalance.toString());
   }, [transactions, recurringExpenses, recurringIncomes, savingGoals, investmentGoals, bankConnections, investments, events, calendarItems, contacts, categoryBudgets, cashOpeningBalance]);
 
+  // FIX: Call backend endpoint instead of direct Gemini API
   const fetchMarketData = async () => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: "Provide current market prices and 24h change for BTC, ETH, SOL, VOO, and VOOG.",
-        config: { tools: [{ googleSearch: {} }] }
+      const response = await fetch('/api/ai/market-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
       });
       
-      const text = response.text || "";
-      const newPrices = marketPrices.map(p => {
-        const regex = new RegExp(`${p.symbol}:?\\s*\\$?([\\d,.]+)`, 'i');
-        const match = text.match(regex);
-        if (match) {
-          return { ...p, price: parseFloat(match[1].replace(/,/g, '')) };
-        }
-        return { ...p, price: p.price * (1 + (Math.random() * 0.002 - 0.001)) }; 
-      });
+      if (!response.ok) {
+        setQuotaExhausted(true);
+        return;
+      }
+
+      const result = await response.json();
       
-      setMarketPrices(newPrices);
-      setQuotaExhausted(false);
+      if (result.quotaExhausted) {
+        setQuotaExhausted(true);
+      } else if (result.prices && result.prices.length > 0) {
+        setMarketPrices(result.prices);
+        setQuotaExhausted(false);
+      }
     } catch (e) {
+      console.error('Failed to fetch market data:', e);
       setQuotaExhausted(true);
     }
   };
