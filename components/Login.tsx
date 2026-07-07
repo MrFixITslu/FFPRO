@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { authService, AuthUser } from '../services/authService';
 
 interface Props {
@@ -22,6 +22,17 @@ const Login: React.FC<Props> = ({ onAuthenticated }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [availableProviders, setAvailableProviders] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    authService.providers().then((providers) => {
+      if (!cancelled) setAvailableProviders(providers);
+    }).catch(() => {
+      if (!cancelled) setAvailableProviders([]);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,15 +67,19 @@ const Login: React.FC<Props> = ({ onAuthenticated }) => {
         </div>
 
         <div className="bg-white/5 backdrop-blur-xl p-10 rounded-[3rem] border border-white/10 shadow-2xl space-y-6 animate-in zoom-in-95 duration-500">
-          <div className="space-y-3">
-            <OAuthButton provider="google" label="Google" icon="fab fa-google" />
-            <OAuthButton provider="facebook" label="Facebook" icon="fab fa-facebook" />
-            <OAuthButton provider="apple" label="Apple" icon="fab fa-apple" />
-          </div>
+          {availableProviders.length > 0 && (
+            <div className="space-y-3">
+              {availableProviders.includes('google') && <OAuthButton provider="google" label="Google" icon="fab fa-google" />}
+              {availableProviders.includes('facebook') && <OAuthButton provider="facebook" label="Facebook" icon="fab fa-facebook" />}
+              {availableProviders.includes('apple') && <OAuthButton provider="apple" label="Apple" icon="fab fa-apple" />}
+            </div>
+          )}
 
-          <div className="flex items-center gap-3 text-slate-600 text-[9px] font-black uppercase tracking-widest">
-            <div className="flex-1 h-px bg-white/10" /> or use email <div className="flex-1 h-px bg-white/10" />
-          </div>
+          {availableProviders.length > 0 && (
+            <div className="flex items-center gap-3 text-slate-600 text-[9px] font-black uppercase tracking-widest">
+              <div className="flex-1 h-px bg-white/10" /> or use email <div className="flex-1 h-px bg-white/10" />
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>

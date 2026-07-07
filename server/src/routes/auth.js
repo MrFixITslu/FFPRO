@@ -4,7 +4,18 @@ import passport from '../passport.js';
 import { pool } from '../db.js';
 
 const router = Router();
-const FRONTEND_URL = process.env.FRONTEND_URL || '/';
+const FRONTEND_URL = (process.env.FRONTEND_URL || '/').replace(/\/$/, '');
+const AVAILABLE_OAUTH_PROVIDERS = [];
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  AVAILABLE_OAUTH_PROVIDERS.push('google');
+}
+if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
+  AVAILABLE_OAUTH_PROVIDERS.push('facebook');
+}
+if (process.env.APPLE_CLIENT_ID && process.env.APPLE_TEAM_ID && process.env.APPLE_KEY_ID) {
+  AVAILABLE_OAUTH_PROVIDERS.push('apple');
+}
 
 function sanitizeUser(user) {
   if (!user) return null;
@@ -21,6 +32,21 @@ function sanitizeUser(user) {
 router.get('/me', (req, res) => {
   res.json({ user: sanitizeUser(req.user) });
 });
+
+router.get('/session-state', (req, res) => {
+  res.json({ authenticated: !!req.user, user: sanitizeUser(req.user) });
+});
+
+router.get('/providers', (_req, res) => {
+  res.json({ providers: AVAILABLE_OAUTH_PROVIDERS });
+});
+
+function ensureOAuthProvider(req, res, next, provider) {
+  if (!AVAILABLE_OAUTH_PROVIDERS.includes(provider)) {
+    return res.status(503).json({ error: `${provider} authentication is not configured.` });
+  }
+  return next();
+}
 
 // --- Email + password ------------------------------------------------------
 router.post('/register', async (req, res) => {
@@ -95,28 +121,31 @@ router.post('/logout', (req, res) => {
 });
 
 // --- Google ----------------------------------------------------------------
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+router.get('/google', (req, res, next) => ensureOAuthProvider(req, res, next, 'google'), passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get(
   '/google/callback',
-  passport.authenticate('google', { failureRedirect: `${FRONTEND_URL}?auth=failed` }),
-  (_req, res) => res.redirect(`${FRONTEND_URL}?auth=success`)
+  (req, res, next) => ensureOAuthProvider(req, res, next, 'google'),
+  passport.authenticate('google', { failureRedirect: `${FRONTEND_URL}/?auth=failed` }),
+  (_req, res) => res.redirect(`${FRONTEND_URL}/?auth=success`)
 );
 
 // --- Facebook ----------------------------------------------------------------
-router.get('/facebook', passport.authenticate('facebook', { scope: ['email'] }));
+router.get('/facebook', (req, res, next) => ensureOAuthProvider(req, res, next, 'facebook'), passport.authenticate('facebook', { scope: ['email'] }));
 router.get(
   '/facebook/callback',
-  passport.authenticate('facebook', { failureRedirect: `${FRONTEND_URL}?auth=failed` }),
-  (_req, res) => res.redirect(`${FRONTEND_URL}?auth=success`)
+  (req, res, next) => ensureOAuthProvider(req, res, next, 'facebook'),
+  passport.authenticate('facebook', { failureRedirect: `${FRONTEND_URL}/?auth=failed` }),
+  (_req, res) => res.redirect(`${FRONTEND_URL}/?auth=success`)
 );
 
 // --- Apple ----------------------------------------------------------------
 // Apple's callback arrives as a POST (form_post response mode), not a GET.
-router.get('/apple', passport.authenticate('apple'));
+router.get('/apple', (req, res, next) => ensureOAuthProvider(req, res, next, 'apple'), passport.authenticate('apple'));
 router.post(
   '/apple/callback',
-  passport.authenticate('apple', { failureRedirect: `${FRONTEND_URL}?auth=failed` }),
-  (_req, res) => res.redirect(`${FRONTEND_URL}?auth=success`)
+  (req, res, next) => ensureOAuthProvider(req, res, next, 'apple'),
+  passport.authenticate('apple', { failureRedirect: `${FRONTEND_URL}/?auth=failed` }),
+  (_req, res) => res.redirect(`${FRONTEND_URL}/?auth=success`)
 );
 
 export default router;

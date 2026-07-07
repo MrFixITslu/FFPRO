@@ -18,6 +18,8 @@ services:
     build: .
     restart: unless-stopped
     container_name: ffpro_app
+    ports:
+      - "8080:80"
     env_file:
       - ./server/.env
     volumes:
@@ -26,14 +28,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - default
-      - proxy_network
-    # No `ports:` — NPM reaches this over proxy_network by container name (ffpro_app).
 
 volumes:
   ffpro_pgdata:
-
-networks:
-  proxy_network:
-    external: true

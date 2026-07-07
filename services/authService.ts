@@ -19,10 +19,24 @@ async function handle(res: Response): Promise<any> {
 export const authService = {
   /** Returns the currently logged-in user (from the session cookie), or null. */
   async me(): Promise<AuthUser | null> {
-    const res = await fetch(`${BASE}/me`, { credentials: 'include' });
+    const res = await fetch(`${BASE}/me`, { credentials: 'include', headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
     const data = await res.json().catch(() => ({ user: null }));
     return data.user || null;
+  },
+
+  async sessionState(): Promise<{ authenticated: boolean; user: AuthUser | null }> {
+    const res = await fetch(`${BASE}/session-state`, { credentials: 'include', headers: { Accept: 'application/json' } });
+    if (!res.ok) return { authenticated: false, user: null };
+    const data = await res.json().catch(() => ({ authenticated: false, user: null }));
+    return { authenticated: !!data.authenticated, user: data.user || null };
+  },
+
+  async providers(): Promise<string[]> {
+    const res = await fetch(`${BASE}/providers`, { credentials: 'include', headers: { Accept: 'application/json' } });
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ({ providers: [] }));
+    return Array.isArray(data.providers) ? data.providers : [];
   },
 
   async login(email: string, password: string): Promise<AuthUser> {
