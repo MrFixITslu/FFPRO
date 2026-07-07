@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Transaction, RecurringIncome, RecurringExpense, InvestmentAccount, MarketPrice } from '../types';
-import { GoogleGenAI } from "@google/genai";
 
 interface Props {
   transactions: Transaction[];
@@ -122,14 +121,26 @@ const Projections: React.FC<Props> = ({
     const runAI = async () => {
       setIsAnalyzing(true);
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const context = `Current Net Worth: $${currentNetWorth}. Monthly Income: $${monthlyIncome}. Expenses: $${monthlyFixedExpenses + monthlyBudgetedExpenses}. Target Contribution: $${monthlyContribution}. Projected 5-Year Value: $${finalValue}.`;
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: `Analyze this wealth projection context: ${context}. Give one strategic advice regarding the gap between expenses and contribution. Be very concise.`,
-          config: { systemInstruction: "You are a senior financial growth consultant." }
+        // FIX: Call backend endpoint instead of direct Gemini API
+        const response = await fetch('/api/ai/projection-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            currentNetWorth,
+            monthlyIncome,
+            monthlyExpenses: monthlyFixedExpenses + monthlyBudgetedExpenses,
+            monthlyContribution,
+            projectedValue: finalValue
+          })
         });
-        setAiAnalysis(response.text || "Your current path is sustainable. Continue optimizing fixed costs.");
+
+        if (response.ok) {
+          const data = await response.json();
+          setAiAnalysis(data.analysis || "Your current path is sustainable. Continue optimizing fixed costs.");
+        } else {
+          setAiAnalysis("Strategic advisor offline. Market parameters within normal range.");
+        }
       } catch (e) {
         setAiAnalysis("Strategic advisor offline. Market parameters within normal range.");
       } finally {

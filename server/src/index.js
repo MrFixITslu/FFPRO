@@ -12,6 +12,7 @@ import { assertEncryptionConfigured } from './crypto.js';
 import { sameOriginOnly } from './middleware/sameOriginOnly.js';
 import authRoutes from './routes/auth.js';
 import dataRoutes from './routes/data.js';
+import aiRoutes from './routes/ai.js';
 
 // Fail fast on boot rather than on the first request if config is missing.
 for (const key of ['SESSION_SECRET', 'DATABASE_URL']) {
@@ -39,6 +40,26 @@ const TRUST_PROXY_HOPS = Number(process.env.TRUST_PROXY_HOPS || 2);
 app.set('trust proxy', TRUST_PROXY_HOPS);
 
 app.disable('x-powered-by');
+
+// CORS Configuration (FIX: Add explicit CORS headers)
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Accept'],
+  maxAge: 86400
+};
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', corsOptions.origin);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
+    res.header('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(helmet({
   // The frontend pulls Tailwind/Font Awesome/fonts from CDNs and uses inline
   // styles, so a strict default-src CSP would break it without a larger
@@ -86,6 +107,7 @@ app.use('/api/data', (req, res, next) => (req.method === 'GET' ? next() : dataWr
 
 app.use('/api/auth', authRoutes);
 app.use('/api/data', dataRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Fallback error handler — never leak stack traces to clients.
 app.use((err, _req, res, _next) => {

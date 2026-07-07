@@ -145,10 +145,13 @@ if (process.env.APPLE_CLIENT_ID && process.env.APPLE_TEAM_ID && process.env.APPL
       async (req, _accessToken, _refreshToken, idToken, profile, done) => {
         try {
           let displayName;
-          if (req.body?.user) {
+          // FIX: Add validation before parsing user data
+          if (req.body?.user && typeof req.body.user === 'string') {
             try {
               const parsed = JSON.parse(req.body.user);
-              displayName = [parsed.name?.firstName, parsed.name?.lastName].filter(Boolean).join(' ');
+              if (parsed?.name && (typeof parsed.name.firstName === 'string' || typeof parsed.name.lastName === 'string')) {
+                displayName = [parsed.name?.firstName, parsed.name?.lastName].filter(Boolean).join(' ');
+              }
             } catch {
               // Apple didn't send a parseable name payload — safe to ignore.
             }

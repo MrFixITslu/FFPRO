@@ -1,4 +1,3 @@
-
 /**
  * Fire Finance - Hybrid Storage Engine
  * Persistence using IndexedDB with optional SSD Mirroring.
@@ -8,6 +7,18 @@ const DB_NAME = 'FireFinance_v1';
 const DATA_STORE = 'app_state';
 const DOC_STORE = 'internal_docs';
 const MIRROR_HANDLE_STORE = 'mirror_handles';
+
+// FIX: Add timeout wrapper for file operations to prevent hanging
+const TIMEOUT_MS = 10000; // 10 second timeout
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number = TIMEOUT_MS): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs)
+    )
+  ]);
+}
 
 const initDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -79,15 +90,19 @@ export const saveFileToHardDrive = async (
   blob: Blob
 ): Promise<string> => {
   try {
-    const folderName = projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    const projectFolder = await directoryHandle.getDirectoryHandle(folderName, { create: true });
-    const fileHandle = await projectFolder.getFileHandle(fileName, { create: true });
-    const writable = await (fileHandle as any).createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return `${folderName}/${fileName}`;
+    // FIX: Add timeout to prevent hanging
+    const save = async () => {
+      const folderName = projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const projectFolder = await directoryHandle.getDirectoryHandle(folderName, { create: true });
+      const fileHandle = await projectFolder.getFileHandle(fileName, { create: true });
+      const writable = await (fileHandle as any).createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return `${folderName}/${fileName}`;
+    };
+    return await withTimeout(save());
   } catch (error) {
-    console.warn("Hardware mirror failed, fallback to internal db only.");
+    console.warn("Hardware mirror failed, fallback to internal db only.", error);
     throw error;
   }
 };
@@ -100,17 +115,19 @@ export const saveBackupToHardDrive = async (
   data: any
 ): Promise<void> => {
   try {
-    const backupFolder = await directoryHandle.getDirectoryHandle("Fire Finance Backups", { create: true });
-    // Use a fixed name for the latest auto backup to avoid cluttering, 
-    // or include date for historical backups.
-    const fileName = `vault_auto_backup.json`;
-    const fileHandle = await backupFolder.getFileHandle(fileName, { create: true });
-    const writable = await (fileHandle as any).createWritable();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    await writable.write(blob);
-    await writable.close();
+    // FIX: Add timeout to prevent hanging
+    const backup = async () => {
+      const backupFolder = await directoryHandle.getDirectoryHandle("Fire Finance Backups", { create: true });
+      const fileName = `vault_auto_backup.json`;
+      const fileHandle = await backupFolder.getFileHandle(fileName, { create: true });
+      const writable = await (fileHandle as any).createWritable();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      await writable.write(blob);
+      await writable.close();
+    };
+    return await withTimeout(backup());
   } catch (error) {
-    console.warn("Auto-backup mirror write failed. Check permissions.");
+    console.warn("Auto-backup mirror write failed. Check permissions.", error);
     throw error;
   }
 };
