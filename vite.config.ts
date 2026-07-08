@@ -16,10 +16,6 @@ export default defineConfig(({ mode }) => {
         },
       },
       plugins: [react()],
-      define: {
-        // FIX: Removed API_KEY from frontend - now server-side only
-        'process.env.GEMINI_API_KEY': JSON.stringify('')
-      },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

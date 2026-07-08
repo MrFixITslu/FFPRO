@@ -1,0 +1,34 @@
+# --- Core ---
+NODE_ENV=production
+PORT=4000
+DATABASE_URL=postgres://ffpro:cPhTqD4j1oW0FZGvRKOcHVo+RKVCXe7bWnQ7HGpuD9I=@postgres:5432/ffpro
+PGSSL=false
+SESSION_SECRET=fM/tNnDewagQplkMvM+iyDFp7nvae0oHiSBAHePdadrQKwM8wt9VvnZVBcUIZ4/p
+
+# Encrypts each user's synced financial data at the application layer before
+# it's stored in Postgres. Back this up somewhere safe and separate from the
+# DB (password manager / secrets vault) — if it's lost, all synced data
+# becomes permanently unreadable, by design.
+DATA_ENCRYPTION_KEY=Mb/frx6q2NSkhis5LPIa1KmlUCL1Ze/NyfiVX+INNxY=
+
+# browser -> Nginx Proxy Manager (TLS, the only hop) -> this container (port 4000)
+TRUST_PROXY_HOPS=1
+
+FRONTEND_URL=https://ffpro.v79sl.duckdns.org
+
+# --- Google (Google Cloud Console -> APIs & Services -> Credentials) ---
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_CALLBACK_URL=https://ffpro.v79sl.duckdns.org/api/auth/google/callback
+
+# --- Facebook (Meta for Developers -> My Apps) ---
+FACEBOOK_APP_ID=
+FACEBOOK_APP_SECRET=
+FACEBOOK_CALLBACK_URL=https://ffpro.v79sl.duckdns.org/api/auth/facebook/callback
+
+# --- Apple (Apple Developer -> Certificates, Identifiers & Profiles) ---
+APPLE_CLIENT_ID=com.yourcompany.ffpro.web
+APPLE_TEAM_ID=
+APPLE_KEY_ID=
+APPLE_PRIVATE_KEY_PATH=/run/secrets/apple_private_key.p8
+APPLE_CALLBACK_URL=https://ffpro.v79sl.duckdns.org/api/auth/apple/callback

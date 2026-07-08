@@ -1,19 +1,15 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Login from './components/Login';
-import MagicInput from './components/MagicInput';
 import TransactionForm from './components/TransactionForm';
 import Dashboard from './components/Dashboard';
 import Settings from './components/Settings';
 import BankSyncModal from './components/BankSyncModal';
-import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
 import Projections from './components/Projections';
 import Calendar from './components/Calendar';
-import VerificationQueue from './components/VerificationQueue';
 import { 
   Transaction, 
-  AIAnalysisResult, 
   RecurringExpense, 
   RecurringIncome, 
   SavingGoal, 
@@ -59,17 +55,7 @@ const safeParse = (key: string, fallback: any) => {
   }
 };
 
-// FIX: Use cryptographically secure random ID generation instead of Math.random()
-const generateId = (): string => {
-  // Use crypto.randomUUID() if available (modern browsers)
-  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
-    return window.crypto.randomUUID();
-  }
-  // Fallback for older browsers: generate secure random bytes
-  const randomBytes = new Uint8Array(16);
-  crypto.getRandomValues(randomBytes);
-  return Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
-};
+const generateId = () => Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
 
 const MarketTicker = ({ prices, quotaExhausted }: { prices: MarketPrice[], quotaExhausted: boolean }) => {
   return (
@@ -149,9 +135,11 @@ const App: React.FC = () => {
     { symbol: 'VOO', price: 548.12, change24h: 0.2 },
     { symbol: 'VOOG', price: 312.45, change24h: 0.1 }
   ]);
-  const [quotaExhausted, setQuotaExhausted] = useState(false);
+  // Market prices are static: they previously auto-refreshed via a Gemini
+  // call, which has been removed. quotaExhausted stays true permanently so
+  // the ticker honestly labels this as cached/manual data, not a live feed.
+  const [quotaExhausted, setQuotaExhausted] = useState(true);
 
-  const [pendingApprovals, setPendingApprovals] = useState<AIAnalysisResult[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showBankSync, setShowBankSync] = useState(false);
@@ -424,39 +412,9 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.CASH_OPENING, cashOpeningBalance.toString());
   }, [transactions, recurringExpenses, recurringIncomes, savingGoals, investmentGoals, bankConnections, investments, events, calendarItems, contacts, categoryBudgets, cashOpeningBalance]);
 
-  // FIX: Call backend endpoint instead of direct Gemini API
-  const fetchMarketData = async () => {
-    try {
-      const response = await fetch('/api/ai/market-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include'
-      });
-      
-      if (!response.ok) {
-        setQuotaExhausted(true);
-        return;
-      }
-
-      const result = await response.json();
-      
-      if (result.quotaExhausted) {
-        setQuotaExhausted(true);
-      } else if (result.prices && result.prices.length > 0) {
-        setMarketPrices(result.prices);
-        setQuotaExhausted(false);
-      }
-    } catch (e) {
-      console.error('Failed to fetch market data:', e);
-      setQuotaExhausted(true);
-    }
-  };
-
-  useEffect(() => {
-    fetchMarketData();
-    const interval = setInterval(fetchMarketData, 60000 * 5);
-    return () => clearInterval(interval);
-  }, []);
+  // Market prices are entered/updated manually now (see Settings/Investments)
+  // rather than auto-refreshed by an AI call. quotaExhausted is left `true`
+  // (set above) so the ticker always honestly reads "Cached Data".
 
   const handleAuthenticated = (user: AuthUser) => {
     setAuthUser(user);
@@ -550,42 +508,6 @@ const App: React.FC = () => {
       nextConfirmationDate: nextConf.toISOString().split('T')[0],
       lastConfirmedDate: new Date().toISOString().split('T')[0]
     } : i));
-  };
-
-  const handleApproveQueue = (idx: number) => {
-    const item = pendingApprovals[idx];
-    if (item.updateType === 'transaction' && item.transaction) {
-      const transactionToSave: Omit<Transaction, 'id'> = {
-        amount: item.transaction.amount,
-        category: item.transaction.category,
-        description: item.transaction.description,
-        type: item.transaction.type,
-        notes: item.transaction.notes,
-        vendor: item.transaction.vendor,
-        lineItems: item.transaction.lineItems,
-        date: item.transaction.date || new Date().toISOString().split('T')[0]
-      };
-      onAddTransaction(transactionToSave);
-    } else if (item.updateType === 'portfolio' && item.portfolio) {
-      setInvestments(prev => prev.map(inv => {
-        if (inv.provider === item.portfolio?.provider) {
-          const existing = inv.holdings.find(h => h.symbol === item.portfolio?.symbol);
-          if (existing) {
-            return {
-              ...inv,
-              holdings: inv.holdings.map(h => h.symbol === item.portfolio?.symbol ? { ...h, quantity: item.portfolio?.quantity || 0 } : h)
-            };
-          } else {
-            return {
-              ...inv,
-              holdings: [...inv.holdings, { symbol: item.portfolio?.symbol || '', quantity: item.portfolio?.quantity || 0, purchasePrice: 0 }]
-            };
-          }
-        }
-        return inv;
-      }));
-    }
-    setPendingApprovals(prev => prev.filter((_, i) => i !== idx));
   };
 
   const liquidFunds = useMemo(() => {
@@ -756,23 +678,17 @@ const App: React.FC = () => {
                      <h1 className="text-5xl font-black text-slate-800 tracking-tighter">Command Center</h1>
                      <p className="text-[11px] text-slate-400 font-bold uppercase tracking-[0.4em] mt-2">Strategic Intelligence Hub</p>
                    </div>
-                   <div className="w-full md:w-[400px]">
-                      <MagicInput 
-                        onSuccess={(item) => setPendingApprovals(prev => [...prev, item])}
-                        onBulkSuccess={(items) => setPendingApprovals(prev => [...prev, ...items])}
-                        onLoading={setIsLoading}
-                        onManualEntry={() => setShowForm(true)}
-                      />
+                   <div className="w-full md:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => setShowForm(true)}
+                        className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition shadow-md shadow-indigo-200"
+                      >
+                        <i className="fas fa-plus"></i>
+                        Add Transaction
+                      </button>
                    </div>
                 </header>
-
-                <VerificationQueue 
-                  pendingItems={pendingApprovals}
-                  onApprove={handleApproveQueue}
-                  onDiscard={(idx) => setPendingApprovals(prev => prev.filter((_, i) => i !== idx))}
-                  onEdit={() => {}} 
-                  onDiscardAll={() => setPendingApprovals([])}
-                />
 
                 <Dashboard 
                   transactions={transactions}
@@ -836,8 +752,6 @@ const App: React.FC = () => {
               />
             )}
           </main>
-
-          <BudgetAssistant transactions={transactions} investments={investments} marketPrices={marketPrices} availableFunds={liquidFunds} />
 
           {showForm && (
             <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">

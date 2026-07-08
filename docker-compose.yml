@@ -14,13 +14,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # No "networks:" here -> falls onto the default compose network only,
+    # so only the app container (also on default) can reach it. Postgres is
+    # never exposed to proxy_network / the outside world.
 
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
+  app:
+    build: .
     restart: unless-stopped
-    container_name: ffpro_backend
+    container_name: ffpro_app
     env_file:
       - ./server/.env
     volumes:
@@ -29,19 +30,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # No "ports:" here on purpose — the backend is only reachable from the
-    # nginx container over the compose network, never directly from outside.
+    networks:
+      - default        # internal network, so it can reach "postgres"
+      - proxy_network   # external network, so Nginx Proxy Manager can reach "app:4000"
+    # No "ports:" — nothing is published to the host. Nginx Proxy Manager
+    # reaches this container directly over proxy_network, by container name
+    # ("app" or "ffpro_app") on port 4000, which is what Express actually
+    # listens on. This is the fix for "we point to 8080 but the app says
+    # port 4000": there is no longer an 8080 anywhere in this stack — point
+    # NPM's Proxy Host at "ffpro_app", port 4000, instead.
 
-  nginx:
-    build:
-      context: .
-      dockerfile: Dockerfile.nginx
-    restart: unless-stopped
-    container_name: ffpro_nginx
-    ports:
-      - "0.0.0.0:8080:80"
-    depends_on:
-      - backend
+networks:
+  proxy_network:
+    external: true
 
 volumes:
   ffpro_pgdata:
