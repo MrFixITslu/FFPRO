@@ -1,48 +1,57 @@
-services:
-  postgres:
-    image: postgres:16.4-alpine
-    restart: unless-stopped
-    container_name: ffpro_postgres
-    environment:
-      POSTGRES_USER: ffpro
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ffpro_password}
-      POSTGRES_DB: ffpro
-    volumes:
-      - ffpro_pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ffpro"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    # No "networks:" here -> falls onto the default compose network only,
-    # so only the app container (also on default) can reach it. Postgres is
-    # never exposed to proxy_network / the outside world.
+version: '3.8'
 
-  app:
-    build: .
+services:
+  fire-finance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fire-finance-app
     restart: unless-stopped
-    container_name: ffpro_app
-    env_file:
-      - ./server/.env
-    volumes:
-      # Mount the Apple Sign In private key (.p8) read-only if you're using Apple auth.
-      - ./server/secrets:/run/secrets:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
+    ports:
+      # Expose host port (default 3010) mapping to container port 3000. 
+      # Customize via APP_PORT in your .env file if needed.
+      - "${APP_PORT:-3010}:3000"
     networks:
-      - default        # internal network, so it can reach "postgres"
-      - proxy_network   # external network, so Nginx Proxy Manager can reach "app:4000"
-    # No "ports:" — nothing is published to the host. Nginx Proxy Manager
-    # reaches this container directly over proxy_network, by container name
-    # ("app" or "ffpro_app") on port 4000, which is what Express actually
-    # listens on. This is the fix for "we point to 8080 but the app says
-    # port 4000": there is no longer an 8080 anywhere in this stack — point
-    # NPM's Proxy Host at "ffpro_app", port 4000, instead.
+      - proxy_network
+    environment:
+      - NODE_ENV=production
+      
+      # Persist Database and Keys
+      - DATABASE_FILE=/app/data/database.json
+      - ENCRYPTION_KEY_FILE=/app/data/encryption.key
+      
+      # Master Encryption Keys (Will read from your server's .env file, or auto-generate on boot)
+      - SESSION_SECRET=${SESSION_SECRET}
+      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
+      
+      # Database Connection (Optional real PostgreSQL)
+      - DATABASE_URL=${DATABASE_URL}
+      - PGHOST=${PGHOST}
+      - PGPORT=${PGPORT}
+      - PGUSER=${PGUSER}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGDATABASE=${PGDATABASE}
+      
+      # Gemini AI Integration
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      
+      # OAuth - Google Developer Portal
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL:-http://199.223.249.193/api/auth/google/callback}
+      
+      # OAuth - Meta Developer Portal
+      - FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
+      - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET}
+      - FACEBOOK_CALLBACK_URL=${FACEBOOK_CALLBACK_URL:-http://199.223.249.193/api/auth/facebook/callback}
+      
+      # Base Application URLs
+      - FRONTEND_URL=${FRONTEND_URL:-http://199.223.249.193}
+    volumes:
+      # Persistent local data directory for database and key persistence
+      - ./data:/app/data
 
 networks:
+  # Join your existing external Nginx/OpenResty proxy network
   proxy_network:
     external: true
-
-volumes:
-  ffpro_pgdata:
